@@ -1,65 +1,286 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { products } from "../data/products";
+import ProductCard from "../components/ProductCard";
+
+// carrito
+import { iniciarTimerCarrito, cancelarTimer } from "@/utils/carritoAbandonado";
+
+// Firebase
+import { guardarPedido } from "../services/pedidos";
+
+// chatbot
+import { enviarWhatsApp } from "@/utils/whatsapp";
+import { obtenerMensajes } from "@/utils/chatbot";
+import { procesarMensaje } from "@/utils/template";
 
 export default function Home() {
+
+  const [carrito, setCarrito] = useState<any[]>([]);
+  const [mostrarCheckout, setMostrarCheckout] = useState(false);
+
+  const [nombre, setNombre] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [direccion, setDireccion] = useState("");
+
+  // ===============================
+  // LOCAL STORAGE
+  // ===============================
+
+  useEffect(() => {
+
+    const carritoGuardado = localStorage.getItem("carrito");
+    const telefonoGuardado = localStorage.getItem("telefono");
+
+    if (carritoGuardado) setCarrito(JSON.parse(carritoGuardado));
+    if (telefonoGuardado) setTelefono(telefonoGuardado);
+
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("carrito", JSON.stringify(carrito));
+  }, [carrito]);
+
+  useEffect(() => {
+    if (telefono) localStorage.setItem("telefono", telefono);
+  }, [telefono]);
+
+  // ===============================
+  // ACTUALIZAR CARRITO + TIMER
+  // ===============================
+
+  const actualizarCantidad = (producto: any, cantidad: number) => {
+
+    let nuevoCarrito = [...carrito];
+
+    if (cantidad <= 0) {
+      nuevoCarrito = carrito.filter(p => p.id !== producto.id);
+    } else {
+
+      const existe = carrito.find(p => p.id === producto.id);
+
+      if (existe) {
+        nuevoCarrito = carrito.map(p =>
+          p.id === producto.id ? { ...p, cantidad } : p
+        );
+      } else {
+        nuevoCarrito = [...carrito, { ...producto, cantidad }];
+      }
+    }
+
+    setCarrito(nuevoCarrito);
+
+    // 🔥 TIMER
+    const tel = telefono || localStorage.getItem("telefono");
+
+    if (tel && nuevoCarrito.length > 0) {
+      iniciarTimerCarrito(tel, nuevoCarrito);
+    }
+  };
+
+  // ===============================
+  // TOTAL
+  // ===============================
+
+  const total = carrito.reduce(
+    (acc, item) => acc + item.precio * item.cantidad,
+    0
+  );
+
+  // ===============================
+  // FINALIZAR PEDIDO (CON VARIABLES)
+  // ===============================
+
+  const finalizarPedido = async () => {
+
+    try {
+
+      const pedido = {
+        cliente: nombre,
+        telefono,
+        direccion,
+        productos: carrito,
+        total,
+        estado: "pendiente"
+      };
+
+      await guardarPedido(pedido);
+
+      cancelarTimer();
+
+      const mensajes = await obtenerMensajes();
+
+      // 🔥 DATOS DINÁMICOS
+      const datos = {
+        cliente: nombre,
+        telefono,
+        total: total.toFixed(2),
+        productos: carrito,
+        fecha: new Date().toLocaleString("es-HN")
+      };
+
+      // 🧠 MENSAJE AUTOMÁTICO
+      if (mensajes?.bienvenida) {
+
+        const mensajeAuto = procesarMensaje(
+          mensajes.bienvenida,
+          datos
+        );
+
+        enviarWhatsApp(telefono, mensajeAuto);
+      }
+
+      // 🧾 MENSAJE COMPLETO
+      const listaProductos = carrito.map(
+        (p) =>
+          `X${p.cantidad} ${p.nombre}  L ${(p.precio * p.cantidad).toFixed(2)}`
+      ).join("\n");
+
+      const mensaje = `
+🗓️ ${datos.fecha}
+
+Nombre: ${nombre}
+Tel: ${telefono}
+Dirección: ${direccion}
+
+🛒 Productos:
+${listaProductos}
+
+Total: L ${total.toFixed(2)}
+`;
+
+      window.open(`https://wa.me/50496416141?text=${encodeURIComponent(mensaje)}`);
+
+      setCarrito([]);
+      localStorage.removeItem("carrito");
+
+    } catch (error) {
+      alert("Error guardando pedido");
+    }
+
+  };
+
+  // ===============================
+  // UI
+  // ===============================
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+
+    <main className="min-h-screen bg-gray-100 p-4 md:p-10">
+
+      <h1 className="text-2xl md:text-4xl font-bold mb-2">
+        🧀 Lácteos El Don
+      </h1>
+
+      <p className="text-gray-600 mb-6">
+        Productos frescos directo del campo
+      </p>
+
+      {/* PRODUCTOS */}
+
+      <div className="grid gap-4 md:max-w-3xl">
+
+        {products.map((product) => (
+
+          <ProductCard
+            key={product.id}
+            {...product}
+            cantidad={
+              carrito.find(p => p.id === product.id)?.cantidad || 0
+            }
+            onAdd={() =>
+              actualizarCantidad(
+                product,
+                (carrito.find(p => p.id === product.id)?.cantidad || 0) + 1
+              )
+            }
+            onRemove={() =>
+              actualizarCantidad(
+                product,
+                (carrito.find(p => p.id === product.id)?.cantidad || 0) - 1
+              )
+            }
+            onChange={(cantidad) =>
+              actualizarCantidad(product, cantidad)
+            }
+          />
+
+        ))}
+
+      </div>
+
+      {/* 🛒 CARRITO */}
+
+      {carrito.length > 0 && (
+
+        <div className="fixed bottom-4 right-4 left-4 md:left-auto md:w-64 bg-white p-4 rounded-xl shadow-xl">
+
+          <p className="font-bold">🛒 Pedido</p>
+
+          <p className="text-sm">{carrito.length} productos</p>
+
+          <p className="font-bold">
+            L {total.toFixed(2)}
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+          <button
+            onClick={() => setMostrarCheckout(true)}
+            className="mt-2 bg-green-600 text-white w-full p-2 rounded"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            Finalizar
+          </button>
+
+        </div>
+
+      )}
+
+      {/* CHECKOUT */}
+
+      {mostrarCheckout && (
+
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+
+          <div className="bg-white p-6 rounded-xl w-full max-w-md">
+
+            <h2 className="text-xl font-bold mb-3">
+              Finalizar pedido
+            </h2>
+
+            <input
+              placeholder="Nombre"
+              className="border p-2 w-full mb-2 rounded"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            <input
+              placeholder="Teléfono"
+              className="border p-2 w-full mb-2 rounded"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+            />
+
+            <input
+              placeholder="Dirección"
+              className="border p-2 w-full mb-3 rounded"
+              value={direccion}
+              onChange={(e) => setDireccion(e.target.value)}
+            />
+
+            <button
+              onClick={finalizarPedido}
+              className="bg-green-600 text-white w-full p-3 rounded"
+            >
+              Enviar pedido
+            </button>
+
+          </div>
+
         </div>
-      </main>
-    </div>
+
+      )}
+
+    </main>
   );
 }
